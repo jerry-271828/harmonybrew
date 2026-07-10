@@ -44,6 +44,7 @@ Harmonybrew 是 HarmonyOS PC（arm64_ohos）上的 Homebrew 移植版。本 skil
 - 签名在链接期生成，**链接后任何修改 ELF 的操作（strip、objcopy）都会使签名失效**。要 strip 就在链接参数里做，或干脆不 strip。
 - 产物必须用捆绑的 `scripts/verify-codesign.py` 复算根哈希（`MATCH: True` 才算签好），并作为 CI 门禁——lld 的 bug 不会报错，只会产出坏签名。
 - 事后补签（真机上）：`binary-sign-tool sign -inFile X -outFile X -selfSign 1`（binary-sign-tool 由 `ohos-sdk` 包提供，装 `devel-base` 也会带上）。真机上用 devel-base 工具链编译则自动签名（它的 ld.lld 封装默认加 `--code-sign`）。
+- **补签前的 64KB 节区对齐绝不能碰 TLS 节区**（`.tdata`/`.tbss`，flag 含 `T`）。local-exec TLS 的 TP 相对偏移在编译期按原始 PT_TLS p_align（常见 0x20）写死在代码里；objcopy 把它对齐到 0x10000 会改变 musl 运行时 TLS 布局，所有 `thread_local` 读到垃圾 → 启动数秒后 SIGSEGV（chromium 上表现为 `ThreadIdNameManager::GetName` null deref，fault addr 0x17 这类小偏移）。binary-sign-tool 对未对齐的 TLS 节区照常接受，跳过即可。详见 [pip-code-sign.md](pip-code-sign.md)；修好的参考实现：[playwright-mcp-ohos 的 ohos_sign_sweep.py](https://github.com/jerry-271828/playwright-mcp-ohos/blob/main/scripts/ohos_sign_sweep.py)（harmonybrew 官方 ohos-pip-autosign 1.0.0 的 hook 仍有此 bug——它对齐所有 `A` 节区不排除 `T`）。
 - 真机排查：失败后立刻 `hilog -x | grep -iE "xpm|code.?sign|verity"`。
 
 ## 3. CI 交叉编译配方（GitHub Actions）
